@@ -41,6 +41,32 @@ NodeSocketForgeTls.prototype.connect = function(port, hostname, connectListener)
     // mechanism. This has been reported in the following Github ticket:
     // https://github.com/digitalbazaar/forge/issues/188
     caStore: this.caStore,
+    // When only caStore is specified, Forge verifies that:
+    //  * the presented certificate chain is a valid chain
+    //  * the presented certificate chain chains up to a certificate in caStore
+    //  * each presented certificate is valid (as in date/time)
+    //  * each certificate used for signing actually is a CA certificate
+    // (see https://github.com/digitalbazaar/forge/blob/0.6.18/js/x509.js#L2723)
+    // but it does not verify that the common name of the non-CA certificate
+    // matches the hostname we are connecting to. To do so, we register an
+    // additional verify function intervening at certificate depth = 0 (i.e.
+    // the non-CA certificate) when the common name does not match the host
+    // name we are connecting to. Without this check, any other certificate
+    // chaining up to a root CA in caStore can be used for a man in the middle
+    // attack. Depending on the behaviour of the root certificate authorities,
+    // contained in the caStore, obtaining such certificates might be (likely
+    // is) legitimately possible. Clarification for behaviour of the caStore
+    // and verify options has been requested in the following Github ticket:
+    // https://github.com/digitalbazaar/forge/issues/195
+    verify: function(connection, verified, depth, certs) {
+      if (depth === 0 && certs[0].subject.getField('CN').value !== hostname) {
+        verified = {
+          alert: forge.tls.Alert.Description.bad_certificate,
+          message: 'Certificate common name does not match hostname.'
+        };
+      }
+      return verified;
+    },
     connected: function(connection) {
       self.emit('connect'); // Socket event
     },
